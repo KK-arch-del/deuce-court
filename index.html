@@ -60,6 +60,11 @@ button:focus-visible,[role=radio]:focus-visible{outline:2px solid var(--ball);ou
 .feedback.show{opacity:1}
 .f-perfect{color:var(--ball)}.f-good{color:var(--chalk)}.f-bad{color:var(--clay)}
 .meter-wrap{position:absolute;left:50%;bottom:calc(30px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:grid;justify-items:center;gap:6px;font-family:var(--font-d)}
+.aim-lbl{position:absolute;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);padding:4px 12px;background:var(--panel);font-size:14px;font-weight:700;letter-spacing:.06em;white-space:nowrap;pointer-events:none}
+.aim-lbl::before{content:'狙い ';color:var(--ball);font-size:12px}
+.is-touch .aim-lbl{bottom:auto;top:calc(150px + env(safe-area-inset-top,0px))}
+@media (orientation:landscape) and (max-height:500px){.is-touch .aim-lbl{top:calc(58px + env(safe-area-inset-top,0px))}}
+.aim-lbl:empty{display:none}
 .meter-lbl{font-size:12px;letter-spacing:.18em;color:var(--muted);font-weight:600;text-transform:uppercase}
 .meter{position:relative;width:240px;height:10px;background:rgba(11,24,40,.8);box-shadow:inset 0 0 0 1px var(--hair)}
 .meter i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--chalk)}
@@ -285,6 +290,7 @@ details.snd[open] summary{margin-bottom:10px}
     <div class="call" id="call"></div>
     <div class="feedback" id="feedback"></div>
     <div class="hint" id="hint" hidden></div>
+    <div class="aim-lbl" id="aim-lbl"></div>
     <div class="meter-wrap" id="meter-wrap" hidden>
       <span class="meter-lbl" id="meter-lbl">POWER</span>
       <div class="meter" id="meter"><div class="zone" id="meter-zone" hidden></div><i id="meter-fill"></i><div class="mark" id="meter-mark" hidden></div></div>
@@ -396,6 +402,7 @@ details.snd[open] summary{margin-bottom:10px}
         <div class="toggles" style="margin-top:14px">
           <button type="button" class="btn-ghost" id="btn-camera">カメラ：中継</button>
           <button type="button" class="btn-ghost" id="btn-assist" aria-pressed="true">落下点ガイド ON</button>
+          <button type="button" class="btn-ghost" id="btn-aim" aria-pressed="true">狙いマーカー ON</button>
         </div>
       </div>
       <div class="ppanel help" id="pp-help" role="tabpanel" hidden></div>
@@ -461,7 +468,7 @@ const COURT = {
   netPostH: 1.07,
   singlesStickX: 5.029,  // singles sticks sit 0.914 m outside the singles sideline
   postX: 6.40,
-  runBack: 6.0,
+  runBack: 8.5,          // generous run-off behind the baseline (big show courts)
   runSide: 3.9,
 };
 const WALL_X = COURT.doublesHalfW + COURT.runSide;
@@ -603,7 +610,7 @@ function playerKit(pl) {
 }
 
 const settings = Object.assign(
-  { diff: 'normal', opp: 'moreau', surface: 'hard', venue: 'day', format: '3games', color: 'navy', sound: true, camera: 'broadcast', assist: true, vibrate: true },
+  { diff: 'normal', opp: 'moreau', surface: 'hard', venue: 'day', format: '3games', color: 'navy', sound: true, camera: 'broadcast', assist: true, vibrate: true, aimMarker: true },
   loadSettings()
 );
 settings.player = Object.assign({}, PLAYER0, settings.player || {});
@@ -974,7 +981,7 @@ function buildSky() {
   sun.castShadow = true;
   sun.shadow.mapSize.set(LOW_GFX ? 1024 : 2048, LOW_GFX ? 1024 : 2048);
   const sc = sun.shadow.camera;
-  sc.left = -24; sc.right = 24; sc.top = 30; sc.bottom = -30; sc.near = 5; sc.far = 90;
+  sc.left = -26; sc.right = 26; sc.top = 34; sc.bottom = -34; sc.near = 5; sc.far = 95;
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.025; sun.shadow.radius = 3;
   scene.add(sun); scene.add(sun.target);
 }
@@ -1387,6 +1394,20 @@ function buildBallVisuals() {
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.22, 32), new THREE.MeshBasicMaterial({ color: '#f2f4ec', transparent: true, opacity: 0, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.004; ring.renderOrder = 2;
   scene.add(ring); world.ring = ring;
+
+  // aim reticle on the opponent's court: ring, cross hairs and a centre dot, tinted by shot type
+  const aimMat = new THREE.MeshBasicMaterial({ color: '#d6e847', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+  const aim = new THREE.Group();
+  const flat = (geo, x = 0, z = 0) => { const m = new THREE.Mesh(geo, aimMat); m.rotation.x = -Math.PI / 2; m.position.set(x, 0, z); m.renderOrder = 4; aim.add(m); return m; };
+  flat(new THREE.RingGeometry(0.4, 0.52, 40));
+  flat(new THREE.CircleGeometry(0.07, 16));
+  for (const [x, z, w, h] of [[0.72, 0, 0.32, 0.08], [-0.72, 0, 0.32, 0.08], [0, 0.72, 0.08, 0.32], [0, -0.72, 0.08, 0.32]]) flat(new THREE.PlaneGeometry(w, h), x, z);
+  aim.position.y = 0.007; aim.visible = false;
+  scene.add(aim); world.aim = aim; world.aimMat = aimMat;
+  // where your own shot actually landed (white = in, red = out)
+  const land = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.17, 28), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false }));
+  land.rotation.x = -Math.PI / 2; land.position.y = 0.006; land.renderOrder = 4; land.visible = false;
+  scene.add(land); world.landMark = land;
 
   // clay marks / review footprint
   const markTex = radialTex(64, 'rgba(105,38,14,0.75)', 'rgba(105,38,14,0)');
@@ -3120,6 +3141,32 @@ function receiveSpot(p) {
   const back = world.surf.key === 'clay' ? 1.6 : world.surf.key === 'grass' ? 0.4 : 0.9;
   return { x: (deuce ? s : -s) * 2.55, z: s * (COURT.halfLen + back) };
 }
+// Where a human serve is aimed right now: ← / → pick wide or T (depends on the court), nothing = body.
+function serveTarget(p) {
+  const [xa, xb] = serviceBoxX(p);
+  const ix = aimX();
+  const tx = ix < 0 ? xa + 0.42 : ix > 0 ? xb - 0.42 : (xa + xb) / 2;
+  return { tx, tz: -p.side * (COURT.serviceLine - 0.55) };
+}
+// Where the human is aiming at this moment (same maths the hit will use), for the on-court reticle.
+function aimPoint(p) {
+  const st = game.state;
+  if (match.server === p.idx && p.serve && p.serve.phase !== 'done' && (st === 'serveReady' || st === 'toss')) {
+    const t = serveTarget(p);
+    return { x: t.tx, z: t.tz, kind: p.serve.kind || 'serve', serve: true, charge: 0, cx: p.x };
+  }
+  if (!p.pending || p.pending.releaseT != null && p.swing && p.swing.done) return null;
+  if (!((st === 'rally' || st === 'toss') && ball.lastHitter !== p.idx)) return null;
+  const c = st === 'rally' ? findCrossing(p, 1.6) : null;
+  const cl = c && classify(c, p);
+  const type = cl ? cl.type : 'ground';
+  let kind = p.pending.kind;
+  if (type === 'smash') kind = 'smash';
+  else if (type === 'volley') kind = kind === 'drop' ? 'dropVolley' : kind === 'lob' ? 'lob' : 'volley';
+  const cx = c ? c.x : p.x;
+  const t = humanTarget(p, kind, type, cx);
+  return { x: t.tx, z: t.tz, kind: p.pending.kind, shotKind: kind, charge: shotTiming(p.pending).charge, cx };
+}
 function serviceBoxX(server) {
   // lateral range of the target box in world x
   const deuce = match.deuceCourt();
@@ -3180,14 +3227,7 @@ function doServe(p) {
   const qh = clamp(1 - Math.max(0, 2.45 - bs.py) * 0.9, 0.2, 1);
   const q = qt * qh;
   // aim
-  const [xa, xb] = serviceBoxX(p);
-  let tx;
-  if (p.human) {
-    const ix = aimX();
-    tx = ix < 0 ? xa + 0.42 : ix > 0 ? xb - 0.42 : (xa + xb) / 2;
-  } else tx = sv.tx;
-  const depth = p.human ? COURT.serviceLine - 0.55 : sv.depth;
-  const tz = -p.side * depth;
+  const { tx, tz } = p.human ? serveTarget(p) : { tx: sv.tx, tz: -p.side * sv.depth };
   let speed = S.v * (0.84 + 0.16 * q) * (1 + (attrOf(p).serve - 0.5) * 0.12);
   if (!p.human) speed *= p.diff.serve * (match.serveNum === 2 ? 0.92 : 1);
   const o = { fx: bs.px, fy: bs.py, fz: bs.pz, tx, tz, top: S.top, side: S.side * p.hand, minClear: S.clear, speed };
@@ -3816,6 +3856,11 @@ function onBallEvent(e) {
 
 function onBounce(e) {
   sfx.bounce(e.x, e.z, e.speed);
+  const hp = players[ball.lastHitter];
+  if (hp && hp.human && ball.bounces === 0 && e.z * hp.side < 0 && !ball.dead) {
+    const out = (ball.isServe ? outsideServiceBox(e.x, e.z, hp.side, match.deuceCourt()) : outsideSingles(e.x, e.z)) - FOOTPRINT > 0;
+    showLanding(e.x, e.z, out);
+  }
   const k = world.surf.key;
   if (k === 'clay') { addMark(e.x, e.z, e.vx, e.vz); spawnDust(e.x, 0.03, e.z, 3, '#c9805c', 0.08, 0.5, 0.7); }
   const nearLine = Math.abs(Math.abs(e.x) - COURT.singlesHalfW + 0.025) < 0.06 || Math.abs(Math.abs(e.z) - COURT.halfLen + 0.05) < 0.08
@@ -4791,6 +4836,8 @@ function syncTitleControls() {
   $('btn-camera').textContent = 'カメラ：' + ({ broadcast: '中継', low: '選手目線', high: '俯瞰' }[settings.camera]);
   $('btn-assist').textContent = settings.assist ? '落下点ガイド ON' : '落下点ガイド OFF';
   $('btn-assist').setAttribute('aria-pressed', String(settings.assist));
+  $('btn-aim').textContent = settings.aimMarker ? '狙いマーカー ON' : '狙いマーカー OFF';
+  $('btn-aim').setAttribute('aria-pressed', String(settings.aimMarker));
 }
 function selectTab(tab) {
   ui.tab = tab;
@@ -4896,6 +4943,7 @@ function initUI() {
   $('btn-sound').addEventListener('click', toggleSound);
   $('btn-camera').addEventListener('click', () => { cycleCamera(); });
   $('btn-assist').addEventListener('click', () => { settings.assist = !settings.assist; saveSettings(); syncTitleControls(); });
+  $('btn-aim').addEventListener('click', () => { settings.aimMarker = !settings.aimMarker; saveSettings(); syncTitleControls(); });
   $('btn-resume').addEventListener('click', () => setPaused(false));
   $('btn-restart').addEventListener('click', () => { setPaused(false); if (game.mode === 'practice') startDrill(game.drill.type); else startGame(ui.lastOpts); });
   $('btn-quit').addEventListener('click', () => { setPaused(false); if (game.mode === 'practice') leaveDrill(); else toTitle(game.context === 'tour' ? 'tour' : 'exh'); });
@@ -5060,8 +5108,10 @@ function helpHTML() {
     <p>ボタンを押して構え、ボールが届く瞬間（ゲージの緑ゾーン）に指を離すと PERFECT。長く押すほどパワーが乗りますが、緑ゾーンは狭くなります。離さなければ自動で打ちます。</p>
     <h3>コースの打ち分け</h3>
     <p>打つ瞬間にスティックを倒した方向へ飛びます（左右でコース、上で深く、下で短く角度をつける）。</p>
+    <h3>狙いマーカー</h3>
+    <p>ボタンを押している間、相手コートに照準が出ます。そこが今の狙いです（色はショットの種類）。打ったあとは、実際に落ちた場所に小さな印（白＝イン、赤＝アウト）が出ます。ポーズ画面で ON / OFF できます。</p>
     <h3>サーブ</h3>
-    <p>KICK / SLICE / FLAT のどれかを押してトス → ボールが一番高い所でもう一度押します。</p>
+    <p>KICK / SLICE / FLAT のどれかを押してトス → ボールが一番高い所でもう一度押します。スティックの左右でワイド / センターを狙えます（照準で確認できます）。</p>
     <h3>その他</h3>
     <dl>
       <dt><span class="pill">CHALLENGE</span></dt><dd>アウト判定に異議（ポイント直後に表示）</dd>
@@ -5088,6 +5138,8 @@ function helpHTML() {
     <p>ショットキーを押して構え、ボールが届く瞬間（緑ゾーン）に離すと PERFECT。軽く押せばコントロール重視、長く押すほどパワーショット（緑ゾーンが狭くなる）。早く離すと引っかけ、遅いと振り遅れ。離さずに待てば自動で打ちます。</p>
     <h3>コースの打ち分け</h3>
     <p>打つ瞬間の方向キーでコースが決まります（←→ 左右、↑ 深く、↓ 短く角度）。</p>
+    <h3>狙いマーカー</h3>
+    <p>ショットキーを押している間、相手コートに照準が出ます。そこが今の狙いです（色はショットの種類）。打ったあとは、実際に落ちた場所に小さな印（白＝イン、赤＝アウト）が出ます。ポーズ画面で ON / OFF できます。</p>
     <h3>サーブ</h3>
     <p><kbd>J</kbd> キック / <kbd>K</kbd> スライス / <kbd>I</kbd> フラットでトス → ボールが一番高い所でもう一度同じキー。トス前に ←→ で立ち位置を調整できます。</p>
     <h3>スタミナ</h3>
@@ -5107,6 +5159,59 @@ function openHelp() {
   if (game.mode !== 'match' && game.mode !== 'practice') return;
   if (game.paused && ui.pauseTab === 'help') { setPaused(false); return; }
   setPaused(true, 'help');
+}
+
+// ---------- aim reticle & landing mark ----------
+const AIM_COLORS = { topspin: '#d6e847', kick: '#d6e847', slice: '#6fb6ff', flat: '#f2f4ec', lob: '#ff9f43', drop: '#c08cff', serve: '#f2f4ec' };
+const aimUI = { op: 0, x: 0, z: 0, land: 0, label: '' };
+function aimWords(a, p) {
+  if (a.serve) {
+    const t = Math.abs(a.x) < 1.0 ? 'センター（T）' : Math.abs(a.x) > 3 ? 'ワイド' : 'ボディ';
+    return 'サーブ：' + t;
+  }
+  let side;
+  if (Math.abs(a.x) < 1.3) side = 'センター';
+  else if (Math.abs(a.cx) < 0.8) side = a.x * p.side > 0 ? '右' : '左';          // hitting from the middle: just say which side
+  else side = Math.sign(a.x) === Math.sign(a.cx) ? 'ストレート' : 'クロス';
+  const d = Math.abs(a.z);
+  const depth = a.shotKind === 'lob' ? 'ロブ' : a.shotKind === 'drop' || a.shotKind === 'dropVolley' ? 'ドロップ' : d > 9.6 ? '深く' : d < 7.6 ? '短く・角度' : '';
+  return side + (depth ? '・' + depth : '');
+}
+function updateAimMarker(dt) {
+  const A = world.aim;
+  if (!A) return;
+  const h = (game.mode === 'match' || game.mode === 'practice') && game.state !== 'replay' && game.state !== 'hawkeye' ? players.find(p => p.human) : null;
+  const on = settings.aimMarker || (game.drill && game.drill.type === 'target');
+  const a = h && on ? aimPoint(h) : null;
+  if (a) {
+    if (aimUI.op < 0.05) { aimUI.x = a.x; aimUI.z = a.z; }
+    aimUI.x = damp(aimUI.x, a.x, 16, dt); aimUI.z = damp(aimUI.z, a.z, 16, dt);
+    world.aimMat.color.set(AIM_COLORS[a.kind] || '#f2f4ec');
+    A.scale.setScalar(1.45 * (1 + a.charge * 0.4));
+    aimUI.label = aimWords(a, h);
+  }
+  aimUI.op = damp(aimUI.op, a ? 0.9 : 0, a ? 14 : 7, dt);
+  A.position.set(aimUI.x, 0.007, aimUI.z);
+  A.rotation.y += dt * 0.6;
+  world.aimMat.opacity = aimUI.op * (0.75 + 0.25 * Math.sin(performance.now() / 160));
+  A.visible = aimUI.op > 0.02;
+  const lbl = $('aim-lbl'), txt = a ? aimUI.label : '';
+  if (lbl.textContent !== txt) lbl.textContent = txt;
+  // landing mark fades out over ~1.4 s
+  const L = world.landMark;
+  if (aimUI.land > 0) {
+    aimUI.land = Math.max(0, aimUI.land - dt);
+    L.material.opacity = Math.min(1, aimUI.land / 0.5) * 0.95;
+    L.scale.setScalar(1 + (1.4 - aimUI.land) * 0.4);
+    L.visible = true;
+  } else L.visible = false;
+}
+function showLanding(x, z, out) {
+  if (!settings.aimMarker && !(game.drill && game.drill.type === 'target')) return;
+  const L = world.landMark;
+  L.position.set(x, 0.006, z);
+  L.material.color.set(out ? '#ff5a4f' : '#ffffff');
+  aimUI.land = 1.4;
 }
 
 // ---------- volume & vibration ----------
@@ -5456,11 +5561,14 @@ function updateCamera(dt) {
       _cp.set(0, 34, 15); _cl.set(0, 0, -0.5); fov = 40 * Math.min(wide, 1.4);
     } else {
       const fx = clamp((h ? h.x : 0) * 0.3 + (ball.visible ? bp.x : 0) * 0.12, -2.5, 2.5);
+      // the player retreating deep behind the baseline pulls the camera back so they stay in frame
+      cam.deep = damp(cam.deep || 0, h ? clamp(h.z - 12.4, 0, 8) : 0, 3, dt);
+      const dp = cam.deep;
       if (camera.aspect < 1) {
         // portrait phone: climb higher and widen so both baselines and sidelines stay in frame
-        _cp.set(fx * 0.4, 15.5, 27); _cl.set(fx * 0.25, 0, 0.6);
-        fov = clamp(2 * Math.atan(Math.tan(16.5 * Math.PI / 180) / camera.aspect) * 180 / Math.PI, 40, 78);
-      } else { _cp.set(fx, 8.4, 25); _cl.set(fx * 0.55, 0, 2.6); }
+        _cp.set(fx * 0.4, 15.5 + dp * 1.2, 27 + dp * 0.2); _cl.set(fx * 0.25, 0, 0.6 + dp * 1.3);
+        fov = clamp(2 * Math.atan(Math.tan(16.5 * Math.PI / 180) / camera.aspect) * 180 / Math.PI, 40, 78) + dp * 1.4;
+      } else { _cp.set(fx, 8.4 + dp * 0.16, 25 + dp * 0.88); _cl.set(fx * 0.55, 0, 2.6 + dp * 1.24); fov += dp * 1.2; }
     }
   }
   if (cam.debug) { _cp.fromArray(cam.debug.pos); _cl.fromArray(cam.debug.look); fov = cam.debug.fov || 30; lam = 50; }
@@ -5469,7 +5577,7 @@ function updateCamera(dt) {
   cam.fov = lerp(cam.fov, fov, k);
   camera.position.copy(cam.pos); camera.lookAt(cam.look);
   // a camera inside the near stand would see the backs of spectators' heads: hide that end while it's there
-  const inNear = cam.pos.z > WALL_Z - 0.4 && cam.pos.y < 9.5;
+  const inNear = cam.pos.z > WALL_Z - 0.4 && cam.pos.y < 12;
   if (world.nearEnd && world.nearHidden !== inNear) { world.nearHidden = inNear; for (const o of world.nearEnd) o.visible = !inNear; }
   if (Math.abs(camera.fov - cam.fov) > 0.01) { camera.fov = cam.fov; camera.updateProjectionMatrix(); }
 }
@@ -5510,6 +5618,7 @@ function syncVisuals(dt) {
   }
   ring.material.opacity = damp(ring.material.opacity, show ? 0.55 : 0, 10, dt);
   ring.visible = ring.material.opacity > 0.01;
+  updateAimMarker(dt);
   // officials only turn their heads; 20 updates a second is plenty
   interp.offT = (interp.offT || 0) + dt;
   if (interp.offT > 0.05 || dt === 0) { interp.offT = 0; updateOfficials(world.ball.visible ? b : null); }
