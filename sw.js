@@ -1,5 +1,5 @@
 // Offline cache for Deuce Court. The cache name changes on every build so new versions replace old ones.
-const CACHE = 'deuce-court-20261004204723';
+const CACHE = 'deuce-court-20261004212820';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
   'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js'];
 
